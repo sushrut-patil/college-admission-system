@@ -1,0 +1,76 @@
+-- Create Database
+CREATE DATABASE college_admin_system;
+USE college_admin_system;
+
+-- Department Table
+CREATE TABLE departments (
+    dept_id INT PRIMARY KEY AUTO_INCREMENT,
+    dept_name VARCHAR(100) NOT NULL UNIQUE,
+    dept_code VARCHAR(10) NOT NULL UNIQUE
+);
+
+-- Students Table
+CREATE TABLE students (
+    student_id INT PRIMARY KEY AUTO_INCREMENT,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    dob DATE NOT NULL,
+    phone_number VARCHAR(15) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    department_id INT,
+    address TEXT,
+    previous_qualifications TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (department_id) REFERENCES departments(dept_id)
+);
+
+-- Courses Table
+CREATE TABLE courses (
+    course_id INT PRIMARY KEY AUTO_INCREMENT,
+    course_name VARCHAR(100) NOT NULL,
+    department_id INT,
+    description TEXT,
+    FOREIGN KEY (department_id) REFERENCES departments(dept_id)
+);
+
+-- Enrollments Table
+CREATE TABLE enrollments (
+    enrollment_id INT PRIMARY KEY AUTO_INCREMENT,
+    student_id INT,
+    course_id INT,
+    enrollment_date DATE NOT NULL,
+    FOREIGN KEY (student_id) REFERENCES students(student_id),
+    FOREIGN KEY (course_id) REFERENCES courses(course_id)
+);
+
+-- Fees Table
+CREATE TABLE fees (
+    fee_id INT PRIMARY KEY AUTO_INCREMENT,
+    student_id INT,
+    amount DECIMAL(10,2) NOT NULL,
+    payment_date DATE NOT NULL,
+    payment_method VARCHAR(50) NOT NULL,
+    academic_year VARCHAR(10) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES students(student_id)
+);
+
+-- Admin Table
+CREATE TABLE admins (
+    admin_id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    email VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert Sample Data
+INSERT INTO departments (dept_name, dept_code) VALUES 
+('Bachelor of Computer Applications', 'BCA'),
+('Bachelor of Business Administration', 'BBA'),
+('Bachelor of Computer Science', 'BCS');
+
+-- Insert Sample Admin
+INSERT INTO admins (username, password, email) VALUES 
+('admin', '$2b$12$.tHHflMe2Huf5XRIjFuPj.uwagG58mEnHwJUr.wxN.uCXH9FvLxH6', 'admin@college.edu');
+-- Password is 'admin123' (hashed)
