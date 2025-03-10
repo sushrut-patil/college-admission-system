@@ -2,25 +2,30 @@
 session_start();
 require_once 'config.php';
 
-// Initialize variables
+// Check if user is logged in
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+    header("Location: index.php");
+    exit();
+}
+
+$conn = createConnection();
+
+// Initialize errors array
 $errors = [];
 $success = '';
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $conn = createConnection();
-    
-    // Sanitize and validate inputs
+// Handle Add Student
+if (isset($_POST['add_student'])) {
+    // Sanitize and validate inputs - matching register.php approach
     $first_name = trim(sanitizeInput($_POST['first_name']));
     $last_name = trim(sanitizeInput($_POST['last_name']));
     $dob = $_POST['dob'];
     $phone = trim(sanitizeInput($_POST['phone']));
-    $email = $_POST['email'];
-    $password = $_POST['password'];
-    $confirm_password = $_POST['confirm_password'];
+    $email = $_POST['email']; // Don't trim email to match register.php
     $department_id = isset($_POST['department']) ? intval($_POST['department']) : 0;
-    $address = $_POST['address'];
+    $address = $_POST['address']; // Don't trim address to match register.php
     $prev_qualifications = trim(sanitizeInput($_POST['prev_qualifications']));
-
+    
     // Comprehensive input validation
     if (empty($first_name)) {
         $errors[] = "First name is required";
@@ -37,15 +42,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (empty($email)) {
         $errors[] = "Email is required";
     }
-    if (empty($password)) {
-        $errors[] = "Password is required";
-    }
-    if ($password !== $confirm_password) {
-        $errors[] = "Passwords do not match";
-    }
-    if (strlen($password) < 8) {
-        $errors[] = "Password must be at least 8 characters long";
-    }
     if ($department_id <= 0) {
         $errors[] = "Department selection is required";
     }
@@ -53,16 +49,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $errors[] = "Address is required";
     }
 
-    // Additional specific validations
-    if (!validateEmail($email)) {
+    // Using the same validation functions as in register.php
+    if (!validateEmail($email) && !empty($email)) {
         $errors[] = "Invalid email format";
     }
 
-    if (!validatePhoneNumber($phone)) {
+    if (!validatePhoneNumber($phone) && !empty($phone)) {
         $errors[] = "Invalid phone number. Must be 10 digits.";
     }
 
-    // If no errors, proceed with registration
+    // If no errors, proceed with insertion
     if (empty($errors)) {
         try {
             // Check for existing email
@@ -74,56 +70,75 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if ($check_email_result->num_rows > 0) {
                 $errors[] = "Email already exists in the system";
             } else {
-                // Hash the password
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                // Prepare and execute student insertion - match register.php parameter types
+                $stmt = $conn->prepare("INSERT INTO students (first_name, last_name, dob, phone_number, email, department_id, address, previous_qualifications) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
                 
-                // Prepare and execute student insertion
-                $stmt = $conn->prepare("INSERT INTO students (first_name, last_name, dob, phone_number, email, password, department_id, address, previous_qualifications) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                
-                $stmt->bind_param("sssssssss", 
+                // Fix bind_param types to match register.php approach
+                $stmt->bind_param("sssssiss", 
                     $first_name,
                     $last_name,
                     $dob,
                     $phone,
                     $email,
-                    $hashed_password,
                     $department_id,
                     $address,
                     $prev_qualifications
                 );
                 
                 if ($stmt->execute()) {
-                    // Set a session flash message for login page
-                    $_SESSION['registration_success'] = "Registration successful! You can now login.";
-                    
-                    // Redirect to login page
-                    header("Location: index.php");
-                    exit();
+                    $success = "Student added successfully!";
+                    // Clear form inputs after successful submission
+                    $_POST = [];
                 } else {
                     $errors[] = "Database error: " . $stmt->error;
+                    logError("Student add error: " . $stmt->error);
                 }
                 $stmt->close();
             }
             $check_email->close();
         } catch (Exception $e) {
             $errors[] = "Error: " . $e->getMessage();
+            logError("Unexpected error: " . $e->getMessage());
         }
     }
-    
-    $conn->close();
 }
 
-// Get departments for dropdown
-$conn = createConnection();
+// Handle Delete Student
+if (isset($_GET['delete_student'])) {
+    $student_id = intval($_GET['delete_student']);
+    
+    try {
+        $stmt = $conn->prepare("DELETE FROM students WHERE student_id = ?");
+        $stmt->bind_param("i", $student_id);
+        
+        if ($stmt->execute()) {
+            $success = "Student deleted successfully!";
+        } else {
+            $errors[] = "Error deleting student: " . $stmt->error;
+            logError("Student delete error: " . $stmt->error);
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        $errors[] = "Error: " . $e->getMessage();
+        logError("Unexpected error during delete: " . $e->getMessage());
+    }
+}
+
+// Fetch Departments for Dropdown
 $departments_result = $conn->query("SELECT * FROM departments");
-$conn->close();
+
+// Fetch Students
+$students_result = $conn->query("SELECT s.*, d.dept_name 
+                   FROM students s 
+                   LEFT JOIN departments d ON s.department_id = d.dept_id 
+                   ORDER BY s.student_id DESC");
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Student Registration - College Admission System</title>
+    <title>Student Management</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -132,166 +147,175 @@ $conn->close();
             background-color: #f4f4f4;
         }
         .container {
-            max-width: 800px;
-            margin: 0 auto;
             background-color: white;
             border-radius: 8px;
-            padding: 30px;
+            padding: 20px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            color: #333;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-control {
+        .student-table {
             width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
+            border-collapse: collapse;
+            margin-top: 20px;
         }
-        .btn-submit {
+        .student-table th, .student-table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        .student-table th {
             background-color: #007bff;
             color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            width: 100%;
         }
-        .btn-submit:hover {
-            background-color: #0056b3;
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 5px 10px;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .btn-edit {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-delete {
+            background-color: #dc3545;
+            color: white;
+        }
+        .add-student-form {
+            margin-bottom: 20px;
+        }
+        .add-student-form input, 
+        .add-student-form select {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .add-student-form textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
         }
         .success {
             background-color: #d4edda;
             color: #155724;
-            padding: 15px;
+            padding: 10px;
             border-radius: 4px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
-        .error-list {
+        .error {
             background-color: #f8d7da;
             color: #721c24;
-            padding: 15px;
+            padding: 10px;
             border-radius: 4px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
-        .login-link {
-            text-align: center;
-            margin-top: 20px;
-        }
-        .login-link a {
-            color: #007bff;
-            text-decoration: none;
-        }
-        .login-link a:hover {
-            text-decoration: underline;
+        .error-list {
+            color: #721c24;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Student Registration</h1>
-        
+        <h1>Student Management</h1>
+
         <?php 
         // Display success or error messages
         if (!empty($success)) {
             echo "<div class='success'>" . htmlspecialchars($success) . "</div>";
         }
         if (!empty($errors)) {
-            echo "<div class='error-list'><ul>";
+            echo "<div class='error-list'>";
+            echo "<ul>";
             foreach ($errors as $error) {
                 echo "<li>" . htmlspecialchars($error) . "</li>";
             }
-            echo "</ul></div>";
+            echo "</ul>";
+            echo "</div>";
         }
         ?>
-        
-        <form method="post" action="">
-            <div class="form-group">
-                <label for="first_name">First Name:</label>
-                <input type="text" id="first_name" name="first_name" class="form-control" 
-                       value="<?php echo isset($_POST['first_name']) ? htmlspecialchars($_POST['first_name']) : ''; ?>" required>
-            </div>
+
+        <!-- Add Student Form -->
+        <form method="post" class="add-student-form">
+            <h2>Add New Student</h2>
+            <input type="text" name="first_name" placeholder="First Name" 
+                   value="<?php echo isset($_POST['first_name']) ? htmlspecialchars($_POST['first_name']) : ''; ?>" required>
+            <input type="text" name="last_name" placeholder="Last Name"
+                   value="<?php echo isset($_POST['last_name']) ? htmlspecialchars($_POST['last_name']) : ''; ?>" required>
+            <input type="date" name="dob" placeholder="Date of Birth" 
+                   value="<?php echo isset($_POST['dob']) ? htmlspecialchars($_POST['dob']) : ''; ?>" required>
+            <input type="tel" name="phone" placeholder="Phone Number" 
+                   value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>" required>
+            <input type="email" name="email" placeholder="Email" 
+                   value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>" required>
             
-            <div class="form-group">
-                <label for="last_name">Last Name:</label>
-                <input type="text" id="last_name" name="last_name" class="form-control"
-                       value="<?php echo isset($_POST['last_name']) ? htmlspecialchars($_POST['last_name']) : ''; ?>" required>
-            </div>
+            <select name="department" required>
+                <option value="">Select Department</option>
+                <?php 
+                // Reset department result pointer
+                $departments_result->data_seek(0);
+                while ($dept = $departments_result->fetch_assoc()) {
+                    $selected = (isset($_POST['department']) && $_POST['department'] == $dept['dept_id']) ? 'selected' : '';
+                    echo "<option value='{$dept['dept_id']}' $selected>" . htmlspecialchars($dept['dept_name']) . "</option>";
+                }
+                ?>
+            </select>
             
-            <div class="form-group">
-                <label for="dob">Date of Birth:</label>
-                <input type="date" id="dob" name="dob" class="form-control"
-                       value="<?php echo isset($_POST['dob']) ? htmlspecialchars($_POST['dob']) : ''; ?>" required>
-            </div>
+            <textarea name="address" placeholder="Address" required><?php 
+                echo isset($_POST['address']) ? htmlspecialchars($_POST['address']) : ''; 
+            ?></textarea>
+            <textarea name="prev_qualifications" placeholder="Previous Qualifications"><?php 
+                echo isset($_POST['prev_qualifications']) ? htmlspecialchars($_POST['prev_qualifications']) : ''; 
+            ?></textarea>
             
-            <div class="form-group">
-                <label for="phone">Phone Number:</label>
-                <input type="tel" id="phone" name="phone" class="form-control"
-                       value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="email">Email:</label>
-                <input type="email" id="email" name="email" class="form-control"
-                       value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password" class="form-control" 
-                       placeholder="At least 8 characters" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="confirm_password">Confirm Password:</label>
-                <input type="password" id="confirm_password" name="confirm_password" class="form-control" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="department">Department:</label>
-                <select id="department" name="department" class="form-control" required>
-                    <option value="">Select Department</option>
-                    <?php 
-                    while ($dept = $departments_result->fetch_assoc()) {
-                        $selected = (isset($_POST['department']) && $_POST['department'] == $dept['dept_id']) ? 'selected' : '';
-                        echo "<option value='{$dept['dept_id']}' $selected>" . htmlspecialchars($dept['dept_name']) . "</option>";
-                    }
-                    ?>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="address">Address:</label>
-                <textarea id="address" name="address" class="form-control" rows="3" required><?php 
-                    echo isset($_POST['address']) ? htmlspecialchars($_POST['address']) : ''; 
-                ?></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label for="prev_qualifications">Previous Qualifications:</label>
-                <textarea id="prev_qualifications" name="prev_qualifications" class="form-control" rows="3" required><?php 
-                    echo isset($_POST['prev_qualifications']) ? htmlspecialchars($_POST['prev_qualifications']) : ''; 
-                ?></textarea>
-            </div>
-            
-            <button type="submit" class="btn-submit">Register</button>
+            <button type="submit" name="add_student" class="btn btn-edit">Add Student</button>
         </form>
-        
-        <div class="login-link">
-            Already have an account? <a href="index.php">Login here</a>
-        </div>
+
+        <!-- Student List -->
+        <h2>Students List</h2>
+        <table class="student-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Department</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php 
+                // Reset students result pointer
+                $students_result->data_seek(0);
+                while ($student = $students_result->fetch_assoc()) {
+                    echo "<tr>";
+                    echo "<td>" . htmlspecialchars($student['student_id']) . "</td>";
+                    echo "<td>" . htmlspecialchars($student['first_name'] . ' ' . $student['last_name']) . "</td>";
+                    echo "<td>" . htmlspecialchars($student['email']) . "</td>";
+                    echo "<td>" . htmlspecialchars($student['phone_number']) . "</td>";
+                    echo "<td>" . htmlspecialchars($student['dept_name']) . "</td>";
+                    echo "<td class='action-buttons'>";
+                    echo "<a href='edit_student.php?id=" . htmlspecialchars($student['student_id']) . "' class='btn btn-edit'>Edit</a>";
+                    echo "<a href='?delete_student=" . htmlspecialchars($student['student_id']) . "' class='btn btn-delete' onclick='return confirm(\"Are you sure?\")'>Delete</a>";
+                    echo "</td>";
+                    echo "</tr>";
+                }
+                ?>
+            </tbody>
+        </table>
     </div>
 </body>
 </html>
+<?php 
+$conn->close(); 
+?>
