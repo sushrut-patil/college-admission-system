@@ -76,3 +76,6 @@ INSERT INTO departments (dept_name, dept_code) VALUES
 INSERT INTO admins (username, password, email) VALUES 
 ('admin', '$2b$12$XE/c5XWpM3m1Pp8DDpNBxOXBL4XLsgFAXmx4s44wi1IKauCLeu0ui', 'admin@college.edu');
 -- Password is 'admin123' (hashed)
+
+ALTER TABLE students ADD COLUMN password VARCHAR(255) AFTER email;
+UPDATE students SET password = '$2b$12$8PM7utTKIDGrsgYGK6K8cu2KxPsZ9RoocFNENTIOvJ5miOsEAu7t6';

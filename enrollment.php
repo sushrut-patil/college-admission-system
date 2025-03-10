@@ -2,13 +2,50 @@
 session_start();
 require_once 'config.php';
 
+// Make sure the sanitizeInput function exists
+if (!function_exists('sanitizeInput')) {
+    function sanitizeInput($data) {
+        $data = trim($data);
+        $data = stripslashes($data);
+        $data = htmlspecialchars($data);
+        return $data;
+    }
+}
+
+// Make sure createConnection function exists or create a fallback
+if (!function_exists('createConnection')) {
+    function createConnection() {
+        // Assuming config.php defines these variables
+        global $db_host, $db_user, $db_pass, $db_name;
+        
+        // Create connection
+        $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
+        
+        // Check connection
+        if ($conn->connect_error) {
+            die("Connection failed: " . $conn->connect_error);
+        }
+        
+        return $conn;
+    }
+}
+
+// Debug session
+// Uncomment this line to bypass session check for testing
+// $_SESSION['logged_in'] = true;
+
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     header("Location: index.php");
     exit();
 }
 
-$conn = createConnection();
+// Attempt to create database connection with error handling
+try {
+    $conn = createConnection();
+} catch (Exception $e) {
+    die("Database connection failed: " . $e->getMessage());
+}
 
 // Initialize errors and success messages
 $errors = [];
@@ -41,32 +78,48 @@ if (isset($_POST['enroll_student'])) {
 
     // Check for existing enrollment to prevent duplicates
     if (empty($errors)) {
-        $check_existing = $conn->prepare("SELECT enrollment_id FROM enrollments 
+        try {
+            $check_existing = $conn->prepare("SELECT enrollment_id FROM enrollments 
                                           WHERE student_id = ? AND course_id = ? 
                                           AND academic_year = ? AND semester = ?");
-        $check_existing->bind_param("iiss", $student_id, $course_id, $academic_year, $semester);
-        $check_existing->execute();
-        $existing_result = $check_existing->get_result();
+            if (!$check_existing) {
+                throw new Exception($conn->error);
+            }
+            
+            $check_existing->bind_param("iiss", $student_id, $course_id, $academic_year, $semester);
+            $check_existing->execute();
+            $existing_result = $check_existing->get_result();
 
-        if ($existing_result->num_rows > 0) {
-            $errors[] = "Student is already enrolled in this course for the selected semester and year";
+            if ($existing_result->num_rows > 0) {
+                $errors[] = "Student is already enrolled in this course for the selected semester and year";
+            }
+            $check_existing->close();
+        } catch (Exception $e) {
+            $errors[] = "Database error: " . $e->getMessage();
         }
-        $check_existing->close();
     }
 
     // If no errors, proceed with enrollment
     if (empty($errors)) {
-        $stmt = $conn->prepare("INSERT INTO enrollments 
+        try {
+            $stmt = $conn->prepare("INSERT INTO enrollments 
                                 (student_id, course_id, enrollment_date, academic_year, semester) 
                                 VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("iisss", $student_id, $course_id, $enrollment_date, $academic_year, $semester);
-        
-        if ($stmt->execute()) {
-            $success = "Student enrolled successfully!";
-        } else {
-            $errors[] = "Error enrolling student: " . $stmt->error;
+            if (!$stmt) {
+                throw new Exception($conn->error);
+            }
+            
+            $stmt->bind_param("iisss", $student_id, $course_id, $enrollment_date, $academic_year, $semester);
+            
+            if ($stmt->execute()) {
+                $success = "Student enrolled successfully!";
+            } else {
+                $errors[] = "Error enrolling student: " . $stmt->error;
+            }
+            $stmt->close();
+        } catch (Exception $e) {
+            $errors[] = "Database error: " . $e->getMessage();
         }
-        $stmt->close();
     }
 }
 
@@ -74,37 +127,104 @@ if (isset($_POST['enroll_student'])) {
 if (isset($_GET['delete_enrollment'])) {
     $enrollment_id = intval($_GET['delete_enrollment']);
     
-    $stmt = $conn->prepare("DELETE FROM enrollments WHERE enrollment_id = ?");
-    $stmt->bind_param("i", $enrollment_id);
-    
-    if ($stmt->execute()) {
-        $success = "Enrollment deleted successfully!";
-    } else {
-        $errors[] = "Error deleting enrollment: " . $stmt->error;
+    try {
+        $stmt = $conn->prepare("DELETE FROM enrollments WHERE enrollment_id = ?");
+        if (!$stmt) {
+            throw new Exception($conn->error);
+        }
+        
+        $stmt->bind_param("i", $enrollment_id);
+        
+        if ($stmt->execute()) {
+            $success = "Enrollment deleted successfully!";
+        } else {
+            $errors[] = "Error deleting enrollment: " . $stmt->error;
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        $errors[] = "Database error: " . $e->getMessage();
     }
-    $stmt->close();
 }
 
-// Fetch Enrollment Details with Full Student and Course Information
-$enrollments_query = "SELECT e.*, 
-                     s.first_name, s.last_name, s.email, 
-                     c.course_name, d.dept_name
-                     FROM enrollments e
-                     JOIN students s ON e.student_id = s.student_id
-                     JOIN courses c ON e.course_id = c.course_id
-                     JOIN departments d ON s.department_id = d.dept_id
-                     ORDER BY e.enrollment_date DESC";
-$enrollments_result = $conn->query($enrollments_query);
+// Fetch data with error handling
+try {
+    // Fetch Enrollment Details with Full Student and Course Information
+    $enrollments_query = "SELECT e.*, 
+                         s.first_name, s.last_name, s.email, 
+                         c.course_name, d.dept_name
+                         FROM enrollments e
+                         JOIN students s ON e.student_id = s.student_id
+                         JOIN courses c ON e.course_id = c.course_id
+                         JOIN departments d ON s.department_id = d.dept_id
+                         ORDER BY e.enrollment_date DESC";
+    $enrollments_result = $conn->query($enrollments_query);
+    if (!$enrollments_result) {
+        throw new Exception("Enrollment query error: " . $conn->error);
+    }
 
-// Fetch Students for Dropdown
-$students_query = "SELECT student_id, first_name, last_name, email FROM students";
-$students_result = $conn->query($students_query);
+    // Fetch Students for Dropdown
+    $students_query = "SELECT student_id, first_name, last_name, email FROM students";
+    $students_result = $conn->query($students_query);
+    if (!$students_result) {
+        throw new Exception("Student query error: " . $conn->error);
+    }
 
-// Fetch Courses for Dropdown
-$courses_query = "SELECT course_id, course_name, dept_name 
-                  FROM courses c
-                  JOIN departments d ON c.department_id = d.dept_id";
-$courses_result = $conn->query($courses_query);
+    // Fetch Departments for Dropdown
+    $departments_query = "SELECT dept_id, dept_name FROM departments ORDER BY dept_name";
+    $departments_result = $conn->query($departments_query);
+    if (!$departments_result) {
+        throw new Exception("Department query error: " . $conn->error);
+    }
+
+    // Fetch Courses for Dropdown (will be filtered by JavaScript)
+    $courses_query = "SELECT course_id, course_name, department_id FROM courses ORDER BY course_name";
+    $courses_result = $conn->query($courses_query);
+    if (!$courses_result) {
+        throw new Exception("Course query error: " . $conn->error);
+    }
+    
+    // Calculate Enrollment Summaries - Simplified to avoid subquery issues
+    $enrollment_summary_query = "SELECT 
+        COUNT(*) as total_enrollments,
+        COUNT(DISTINCT student_id) as unique_students,
+        COUNT(DISTINCT course_id) as unique_courses
+        FROM enrollments";
+    $enrollment_summary_result = $conn->query($enrollment_summary_query);
+    if (!$enrollment_summary_result) {
+        throw new Exception("Summary query error: " . $conn->error);
+    }
+    $enrollment_summary = $enrollment_summary_result->fetch_assoc();
+    
+    // Calculate average courses per student separately
+    $avg_courses_query = "SELECT AVG(course_count) as avg_courses_per_student FROM (
+        SELECT student_id, COUNT(course_id) as course_count 
+        FROM enrollments 
+        GROUP BY student_id
+    ) as student_course_counts";
+    $avg_courses_result = $conn->query($avg_courses_query);
+    if ($avg_courses_result) {
+        $avg_courses = $avg_courses_result->fetch_assoc();
+        $enrollment_summary['avg_courses_per_student'] = $avg_courses['avg_courses_per_student'];
+    } else {
+        $enrollment_summary['avg_courses_per_student'] = 0;
+    }
+    
+} catch (Exception $e) {
+    // Handle database errors
+    $errors[] = "Database error: " . $e->getMessage();
+    
+    // Initialize empty result sets to avoid undefined variable errors
+    $enrollments_result = new mysqli_result();
+    $students_result = new mysqli_result();
+    $courses_result = new mysqli_result();
+    $departments_result = new mysqli_result();
+    $enrollment_summary = [
+        'total_enrollments' => 0,
+        'unique_students' => 0,
+        'unique_courses' => 0,
+        'avg_courses_per_student' => 0
+    ];
+}
 ?>
 
 <!DOCTYPE html>
@@ -148,6 +268,7 @@ $courses_result = $conn->query($courses_query);
             padding: 5px 10px;
             text-decoration: none;
             border-radius: 4px;
+            cursor: pointer;
         }
         .btn-edit {
             background-color: #28a745;
@@ -183,6 +304,7 @@ $courses_result = $conn->query($courses_query);
             display: flex;
             justify-content: space-between;
             margin-bottom: 20px;
+            flex-wrap: wrap;
         }
         .enrollment-summary-card {
             background-color: #f8f9fa;
@@ -190,6 +312,12 @@ $courses_result = $conn->query($courses_query);
             padding: 15px;
             text-align: center;
             width: 22%;
+            margin-bottom: 10px;
+        }
+        @media (max-width: 768px) {
+            .enrollment-summary-card {
+                width: 45%;
+            }
         }
     </style>
 </head>
@@ -211,38 +339,25 @@ $courses_result = $conn->query($courses_query);
             echo "</ul>";
             echo "</div>";
         }
-
-        // Calculate Enrollment Summaries
-        $enrollment_summary_query = "SELECT 
-            COUNT(*) as total_enrollments,
-            COUNT(DISTINCT student_id) as unique_students,
-            COUNT(DISTINCT course_id) as unique_courses,
-            AVG(course_count) as avg_courses_per_student
-            FROM (
-                SELECT student_id, COUNT(course_id) as course_count 
-                FROM enrollments 
-                GROUP BY student_id
-            ) as student_course_counts";
-        $enrollment_summary = $conn->query($enrollment_summary_query)->fetch_assoc();
         ?>
 
         <!-- Enrollment Summary Cards -->
         <div class="enrollment-summary">
             <div class="enrollment-summary-card">
                 <h3>Total Enrollments</h3>
-                <p><?php echo $enrollment_summary['total_enrollments']; ?></p>
+                <p><?php echo isset($enrollment_summary['total_enrollments']) ? $enrollment_summary['total_enrollments'] : '0'; ?></p>
             </div>
             <div class="enrollment-summary-card">
                 <h3>Unique Students</h3>
-                <p><?php echo $enrollment_summary['unique_students']; ?></p>
+                <p><?php echo isset($enrollment_summary['unique_students']) ? $enrollment_summary['unique_students'] : '0'; ?></p>
             </div>
             <div class="enrollment-summary-card">
                 <h3>Unique Courses</h3>
-                <p><?php echo $enrollment_summary['unique_courses']; ?></p>
+                <p><?php echo isset($enrollment_summary['unique_courses']) ? $enrollment_summary['unique_courses'] : '0'; ?></p>
             </div>
             <div class="enrollment-summary-card">
                 <h3>Avg Courses/Student</h3>
-                <p><?php echo number_format($enrollment_summary['avg_courses_per_student'], 2); ?></p>
+                <p><?php echo isset($enrollment_summary['avg_courses_per_student']) ? number_format($enrollment_summary['avg_courses_per_student'], 2) : '0.00'; ?></p>
             </div>
         </div>
 
@@ -252,23 +367,34 @@ $courses_result = $conn->query($courses_query);
             <select name="student_id" required>
                 <option value="">Select Student</option>
                 <?php 
-                // Reset the pointer
-                $students_result->data_seek(0);
-                while ($student = $students_result->fetch_assoc()) {
-                    echo "<option value='{$student['student_id']}'>{$student['first_name']} {$student['last_name']} ({$student['email']})</option>";
+                if (isset($students_result) && $students_result->num_rows > 0) {
+                    // Reset the pointer
+                    $students_result->data_seek(0);
+                    while ($student = $students_result->fetch_assoc()) {
+                        echo "<option value='" . htmlspecialchars($student['student_id']) . "'>" . 
+                             htmlspecialchars($student['first_name'] . ' ' . $student['last_name'] . 
+                             ' (' . $student['email'] . ')') . "</option>";
+                    }
                 }
                 ?>
             </select>
             
-            <select name="course_id" required>
-                <option value="">Select Course</option>
+            <select name="department_id" id="department_select" required>
+                <option value="">Select Department</option>
                 <?php 
-                // Reset the pointer
-                $courses_result->data_seek(0);
-                while ($course = $courses_result->fetch_assoc()) {
-                    echo "<option value='{$course['course_id']}'>{$course['course_name']} - {$course['dept_name']}</option>";
+                if (isset($departments_result) && $departments_result->num_rows > 0) {
+                    // Reset the pointer
+                    $departments_result->data_seek(0);
+                    while ($department = $departments_result->fetch_assoc()) {
+                        echo "<option value='" . htmlspecialchars($department['dept_id']) . "'>" . 
+                             htmlspecialchars($department['dept_name']) . "</option>";
+                    }
                 }
                 ?>
+            </select>
+            
+            <select name="course_id" id="course_select" required>
+                <option value="">Select Department First</option>
             </select>
             
             <input type="date" name="enrollment_date" required>
@@ -287,7 +413,8 @@ $courses_result = $conn->query($courses_query);
                 $current_year = date('Y');
                 for ($i = $current_year - 3; $i <= $current_year + 1; $i++) {
                     $academic_year = $i . '-' . ($i + 1);
-                    echo "<option value='$academic_year'>$academic_year</option>";
+                    echo "<option value='" . htmlspecialchars($academic_year) . "'>" . 
+                         htmlspecialchars($academic_year) . "</option>";
                 }
                 ?>
             </select>
@@ -312,29 +439,98 @@ $courses_result = $conn->query($courses_query);
             </thead>
             <tbody>
                 <?php 
-                // Reset the pointer
-                $enrollments_result->data_seek(0);
-                while ($enrollment = $enrollments_result->fetch_assoc()) {
-                    echo "<tr>";
-                    echo "<td>" . htmlspecialchars($enrollment['enrollment_id']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['first_name'] . ' ' . $enrollment['last_name']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['dept_name']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['course_name']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['enrollment_date']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['semester']) . "</td>";
-                    echo "<td>" . htmlspecialchars($enrollment['academic_year']) . "</td>";
-                    echo "<td class='action-buttons'>";
-                    echo "<a href='edit_enrollment.php?id=" . htmlspecialchars($enrollment['enrollment_id']) . "' class='btn btn-edit'>Edit</a>";
-                    echo "<a href='?delete_enrollment=" . htmlspecialchars($enrollment['enrollment_id']) . "' class='btn btn-delete' onclick='return confirm(\"Are you sure?\")'>Delete</a>";
-                    echo "</td>";
-                    echo "</tr>";
+                if (isset($enrollments_result) && $enrollments_result->num_rows > 0) {
+                    // Reset the pointer
+                    $enrollments_result->data_seek(0);
+                    while ($enrollment = $enrollments_result->fetch_assoc()) {
+                        echo "<tr>";
+                        echo "<td>" . htmlspecialchars($enrollment['enrollment_id']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['first_name'] . ' ' . $enrollment['last_name']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['dept_name']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['course_name']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['enrollment_date']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['semester']) . "</td>";
+                        echo "<td>" . htmlspecialchars($enrollment['academic_year']) . "</td>";
+                        echo "<td class='action-buttons'>";
+                        echo "<a href='edit_enrollment.php?id=" . htmlspecialchars($enrollment['enrollment_id']) . 
+                             "' class='btn btn-edit'>Edit</a>";
+                        echo "<a href='?delete_enrollment=" . htmlspecialchars($enrollment['enrollment_id']) . 
+                             "' class='btn btn-delete' onclick='return confirm(\"Are you sure?\")'>Delete</a>";
+                        echo "</td>";
+                        echo "</tr>";
+                    }
+                } else {
+                    echo "<tr><td colspan='8'>No enrollments found</td></tr>";
                 }
                 ?>
             </tbody>
         </table>
     </div>
+
+    <!-- JavaScript for Department-Course filtering -->
+    <script>
+        // Store all courses in a JavaScript variable
+        const allCourses = [
+            <?php
+            if (isset($courses_result) && $courses_result->num_rows > 0) {
+                $courses_result->data_seek(0);
+                while ($course = $courses_result->fetch_assoc()) {
+                    echo "{
+                        id: " . intval($course['course_id']) . ", 
+                        name: '" . addslashes($course['course_name']) . "', 
+                        departmentId: " . intval($course['department_id']) . "
+                    },";
+                }
+            }
+            ?>
+        ];
+
+        // Function to filter courses based on selected department
+        function filterCourses() {
+            const departmentSelect = document.getElementById('department_select');
+            const courseSelect = document.getElementById('course_select');
+            const selectedDepartmentId = parseInt(departmentSelect.value);
+            
+            // Clear existing options
+            courseSelect.innerHTML = '';
+            
+            // If no department is selected
+            if (!selectedDepartmentId) {
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select Department First';
+                courseSelect.appendChild(defaultOption);
+                return;
+            }
+            
+            // Add default option
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Select Course';
+            courseSelect.appendChild(defaultOption);
+            
+            // Filter courses by selected department
+            const filteredCourses = allCourses.filter(course => course.departmentId === selectedDepartmentId);
+            
+            // Add filtered courses to the dropdown
+            filteredCourses.forEach(course => {
+                const option = document.createElement('option');
+                option.value = course.id;
+                option.textContent = course.name;
+                courseSelect.appendChild(option);
+            });
+        }
+
+        // Attach event listener to department dropdown
+        document.getElementById('department_select').addEventListener('change', filterCourses);
+        
+        // Initialize on page load
+        window.onload = filterCourses;
+    </script>
 </body>
 </html>
 <?php 
-$conn->close(); 
+if (isset($conn) && $conn instanceof mysqli) {
+    $conn->close(); 
+}
 ?>
