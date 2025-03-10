@@ -39,6 +39,8 @@ CREATE TABLE enrollments (
     student_id INT,
     course_id INT,
     enrollment_date DATE NOT NULL,
+    semester VARCHAR(10) NOT NULL,
+    academic_year VARCHAR(10) NOT NULL,
     FOREIGN KEY (student_id) REFERENCES students(student_id),
     FOREIGN KEY (course_id) REFERENCES courses(course_id)
 );
@@ -72,5 +74,5 @@ INSERT INTO departments (dept_name, dept_code) VALUES
 
 -- Insert Sample Admin
 INSERT INTO admins (username, password, email) VALUES 
-('admin', '$2b$12$.tHHflMe2Huf5XRIjFuPj.uwagG58mEnHwJUr.wxN.uCXH9FvLxH6', 'admin@college.edu');
+('admin', '$2b$12$XE/c5XWpM3m1Pp8DDpNBxOXBL4XLsgFAXmx4s44wi1IKauCLeu0ui', 'admin@college.edu');
 -- Password is 'admin123' (hashed)

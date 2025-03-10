@@ -21,7 +21,7 @@ if (isset($_POST['add_student'])) {
     $last_name = trim(sanitizeInput($_POST['last_name']));
     $dob = $_POST['dob'];
     $phone = trim(sanitizeInput($_POST['phone']));
-    $email = $_POST['email'];
+    $email = trim(sanitizeInput($_POST['email']));
     $department_id = isset($_POST['department']) ? intval($_POST['department']) : 0;
     $address = $_POST['address'];
     $prev_qualifications = trim(sanitizeInput($_POST['prev_qualifications']));
@@ -92,14 +92,12 @@ if (isset($_POST['add_student'])) {
                     $_POST = [];
                 } else {
                     $errors[] = "Database error: " . $stmt->error;
-                    logError("Student insert error: " . $stmt->error);
                 }
                 $stmt->close();
             }
             $check_email->close();
         } catch (Exception $e) {
             $errors[] = "Error: " . $e->getMessage();
-            logError("Unexpected error: " . $e->getMessage());
         }
     }
 }
@@ -116,12 +114,11 @@ if (isset($_GET['delete_student'])) {
             $success = "Student deleted successfully!";
         } else {
             $errors[] = "Error deleting student: " . $stmt->error;
-            logError("Student delete error: " . $stmt->error);
         }
         $stmt->close();
     } catch (Exception $e) {
         $errors[] = "Error: " . $e->getMessage();
-        logError("Unexpected delete error: " . $e->getMessage());
+
     }
 }
 
